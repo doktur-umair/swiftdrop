@@ -23,7 +23,8 @@
 
 ### Notes for future phases
 - Remote: `origin` -> `https://github.com/umairhassaninfinite-ui/swiftdrop.git`.
-- Current working branch: `umair`, tracking `origin/umair` (base `main` branch preserved).
+- Current working branch: `umair-dev`, tracking `origin/umair-dev` (base `main` branch preserved).
+- Active GitHub CLI (`gh`) account for pushes: `doktur-umair` (configured via `gh auth git-credential`).
 - Git identity: `umair` / `umairhassan.2217@gmail.com`.
 - Branch protection: GitHub Ruleset "Protect main" active on `main`. Direct push, force push, and branch deletion are blocked. Changes require a PR with 0 required approvals (allowing contributors to merge their own PRs).
 
