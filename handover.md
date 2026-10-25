@@ -22,5 +22,7 @@
 - Public repo: never commit secrets (`.env*` is ignored except `.env.example`).
 
 ### Notes for future phases
-- Remote: `origin` -> `https://github.com/umairhassaninfinite-ui/swiftdrop.git`, tracking `main`.
+- Remote: `origin` -> `https://github.com/umairhassaninfinite-ui/swiftdrop.git`.
+- Current working branch: `umair`, tracking `origin/umair` (base `main` branch preserved).
 - Git identity: `umair` / `umairhassan.2217@gmail.com`.
+
