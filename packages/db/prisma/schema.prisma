@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum RoleName {
+  CUSTOMER
+  MERCHANT
+  COURIER
+  DISPATCHER
+  ADMIN
+}
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+enum ParcelStatus {
+  CREATED
+}
+model Role {
+  id    RoleName @id
+  users User[]
+  @@map("roles")
+}
+model User {
+  id           Int @id @default(autoincrement())
+  email        String @unique @db.VarChar(254)
+  passwordHash String? @map("password_hash")
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  fullName     String? @map("full_name") @db.VarChar(120)
+  phone        String? @db.VarChar(16)
+  googleSub    String? @unique @map("google_sub") @db.VarChar(255)
+  roleId       RoleName @map("role_id")
+  role         Role @relation(fields: [roleId], references: [id], onDelete: NoAction)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions     AuthSession[]
+  verificationTokens VerificationToken[]
+  oauthTransactions OAuthTransaction[]
+  quotes Quote[]
+  parcels Parcel[]
+  @@map("users")
+}
+
+model Zone {
+  id        Int      @id @default(autoincrement())
+  district  String   @unique @db.VarChar(80)
+  town      String   @db.VarChar(80)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  originPrices PriceVersion[] @relation("OriginPrices")
+  destinationPrices PriceVersion[] @relation("DestinationPrices")
+  originQuotes Quote[] @relation("QuoteOrigin")
+  destinationQuotes Quote[] @relation("QuoteDestination")
+  originParcels Parcel[] @relation("ParcelOrigin")
+  destinationParcels Parcel[] @relation("ParcelDestination")
+  @@map("zones")
+}
+
+model PriceVersion {
+  id Int @id @default(autoincrement())
+  originZoneId Int @map("origin_zone_id")
+  destinationZoneId Int @map("destination_zone_id")
+  originZone Zone @relation("OriginPrices", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone @relation("DestinationPrices", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  baseCents Int @map("base_cents")
+  perExtraKgCents Int @map("per_extra_kg_cents")
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  quotes Quote[]
+  @@unique([originZoneId, destinationZoneId, effectiveFrom])
+  @@index([originZoneId, destinationZoneId, effectiveFrom])
+  @@map("price_versions")
+}
+
+model Quote {
+  id String @id @default(uuid()) @db.Uuid
+  userId Int @map("user_id")
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  originZoneId Int @map("origin_zone_id")
+  destinationZoneId Int @map("destination_zone_id")
+  originZone Zone @relation("QuoteOrigin", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone @relation("QuoteDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  priceVersionId Int @map("price_version_id")
+  priceVersion PriceVersion @relation(fields: [priceVersionId], references: [id], onDelete: Restrict)
+  weightGrams Int @map("weight_grams")
+  lengthMm Int @map("length_mm")
+  widthMm Int @map("width_mm")
+  heightMm Int @map("height_mm")
+  feeCents Int @map("fee_cents")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  parcel Parcel?
+  @@index([userId, expiresAt])
+  @@map("quotes")
+}
+
+model Parcel {
+  id String @id @default(uuid()) @db.Uuid
+  trackingNumber String @unique @map("tracking_number") @db.VarChar(16)
+  userId Int @map("user_id")
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quoteId String @unique @map("quote_id") @db.Uuid
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  originZoneId Int @map("origin_zone_id")
+  destinationZoneId Int @map("destination_zone_id")
+  originZone Zone @relation("ParcelOrigin", fields: [originZoneId], references: [id], onDelete: Restrict)
+  destinationZone Zone @relation("ParcelDestination", fields: [destinationZoneId], references: [id], onDelete: Restrict)
+  status ParcelStatus @default(CREATED)
+  feeCents Int @map("fee_cents")
+  version Int @default(1)
+  attemptCount Int @default(0) @map("attempt_count")
+  recipientName String @map("recipient_name") @db.VarChar(120)
+  recipientPhone String @map("recipient_phone") @db.VarChar(16)
+  recipientAddress String @map("recipient_address") @db.VarChar(300)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  history ParcelHistory[]
+  @@index([userId, createdAt, id])
+  @@map("parcels")
+}
+
+model ParcelHistory {
+  id BigInt @id @default(autoincrement())
+  parcelId String @map("parcel_id") @db.Uuid
+  parcel Parcel @relation(fields: [parcelId], references: [id], onDelete: Cascade)
+  status ParcelStatus
+  town String @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([parcelId, createdAt, id])
+  @@map("parcel_history")
+}
+
+model IdempotencyRecord {
+  id String @id @default(uuid()) @db.Uuid
+  principalKey String @map("principal_key") @db.VarChar(64)
+  operation String @db.VarChar(80)
+  key String @db.VarChar(128)
+  requestHash String @map("request_hash") @db.Char(64)
+  response Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  @@unique([principalKey, operation, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+model OutboxEvent {
+  id String @id @default(uuid()) @db.Uuid
+  eventId String @unique @map("event_id") @db.Uuid
+  eventType String @map("event_type") @db.VarChar(100)
+  aggregateId String @map("aggregate_id") @db.Uuid
+  payload Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+  attempts Int @default(0)
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+}
+
+model ConsumerProgress {
+  eventId String @id @map("event_id") @db.Uuid
+  eventType String @map("event_type") @db.VarChar(100)
+  consumedAt DateTime @default(now()) @map("consumed_at") @db.Timestamptz(3)
+  @@map("consumer_progress")
+}
+model VerificationToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     Int      @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique @map("token_hash") @db.Char(64)
+  generation Int
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([expiresAt])
+  @@map("verification_tokens")
+}
+model OAuthTransaction {
+  id                String   @id @default(uuid()) @db.Uuid
+  stateHash         String   @unique @map("state_hash") @db.Char(64)
+  nonce             String   @db.VarChar(128)
+  encryptedVerifier String   @map("encrypted_verifier") @db.Text
+  browserHash       String   @map("browser_hash") @db.Char(64)
+  intent            String   @db.VarChar(8)
+  userId            Int?     @map("user_id")
+  user              User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String?  @map("family_id") @db.Uuid
+  passwordHash      String?  @map("password_hash") @db.Text
+  expiresAt         DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt        DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([expiresAt])
+  @@map("oauth_transactions")
+}
+model AuthSession {
+  id                String @id @default(uuid()) @db.Uuid
+  userId            Int @map("user_id")
+  user              User @relation(fields: [userId], references: [id], onDelete: NoAction)
+  roleAtAuthentication RoleName @map("role_at_authentication")
+  authenticatedAt   DateTime @default(now()) @map("authenticated_at") @db.Timestamptz(3)
+  lastRefreshedAt   DateTime @default(now()) @map("last_refreshed_at") @db.Timestamptz(3)
+  idleExpiresAt     DateTime @map("idle_expires_at") @db.Timestamptz(3)
+  absoluteExpiresAt DateTime @map("absolute_expires_at") @db.Timestamptz(3)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revocationReason  String? @map("revocation_reason") @db.VarChar(32)
+  refreshTokens     RefreshToken[]
+  accessGrants      AccessGrant[]
+  @@index([userId, revokedAt])
+  @@index([absoluteExpiresAt])
+  @@map("auth_sessions")
+}
+model RefreshToken {
+  id         String @id @default(uuid()) @db.Uuid
+  tokenHash  String @unique @map("token_hash") @db.Char(64)
+  familyId   String @map("family_id") @db.Uuid
+  family     AuthSession @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  parentId   String? @unique @map("parent_id") @db.Uuid
+  parent     RefreshToken? @relation("Rotation", fields: [parentId], references: [id], onDelete: NoAction)
+  successor  RefreshToken? @relation("Rotation")
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+model AccessGrant {
+  jti       String @id @db.Uuid
+  familyId  String @map("family_id") @db.Uuid
+  family    AuthSession @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("access_grants")
+}

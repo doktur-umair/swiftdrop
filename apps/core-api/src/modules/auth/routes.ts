@@ -1,0 +1,301 @@
+import { Router, type CookieOptions, type RequestHandler } from "express";
+import { randomBytes } from "node:crypto";
+import { doubleCsrf } from "csrf-csrf";
+import {
+  emptySchema,
+  loginSchema,
+  registrationSchema,
+  resendVerificationSchema,
+  verifyEmailSchema,
+  completeProfileSchema,
+  googleLinkSchema,
+} from "@swiftdrop/contracts";
+import type { Config } from "../../shared/config.js";
+import { HttpError } from "../../shared/problem.js";
+import type { RateLimiter } from "../../shared/rate-limit.js";
+import { AuthService } from "./service.js";
+import { authenticate, requireRole } from "./index.js";
+import { publicUser } from "./service.js";
+export const cookieNames = (secure: boolean) => ({
+  refresh: secure ? "__Host-swiftdrop-refresh" : "swiftdrop-refresh",
+  csrf: secure ? "__Host-swiftdrop-csrf" : "swiftdrop-csrf",
+  context: secure ? "__Host-swiftdrop-context" : "swiftdrop-context",
+  oauth: secure ? "__Host-swiftdrop-oauth" : "swiftdrop-oauth",
+});
+export function createAuthRouter(
+  service: AuthService,
+  limiter: RateLimiter,
+  config: Config,
+) {
+  const router = Router();
+  const names = cookieNames(config.secure);
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: config.secure,
+    sameSite: "strict",
+    path: "/",
+  };
+  const csrf = doubleCsrf({
+    getSecret: () => config.csrfSecret,
+    getSessionIdentifier: (req) =>
+      req.cookies[names.refresh] ?? req.cookies[names.context] ?? "",
+    cookieName: names.csrf,
+    cookieOptions: options,
+  });
+  const oauthOptions: CookieOptions = {
+    httpOnly: true,
+    secure: config.secure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 10 * 60 * 1000,
+  };
+  router.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+  const originCheck: RequestHandler = (req, _res, next) => {
+    let origin = req.get("origin");
+    if (!origin && req.get("referer")) {
+      try {
+        origin = new URL(req.get("referer")!).origin;
+      } catch {
+        /* invalid origin is rejected below */
+      }
+    }
+    if (origin !== config.APP_ORIGIN)
+      return next(
+        new HttpError(403, "ORIGIN", "Request origin is not allowed."),
+      );
+    if (!req.is("application/json"))
+      return next(new HttpError(415, "CONTENT_TYPE", "Send application/json."));
+    next();
+  };
+  router.get("/csrf", limiter.middleware("csrf", 240, 60), (req, res) => {
+    if (!req.cookies[names.context]) {
+      const context = randomBytes(32).toString("base64url");
+      req.cookies[names.context] = context;
+      res.cookie(names.context, context, {
+        ...options,
+        maxAge: 30 * 86400 * 1000,
+      });
+    }
+    res.json({ csrfToken: csrf.generateCsrfToken(req, res) });
+  });
+  router.use(
+    (req, res, next) =>
+      req.method === "POST" ? originCheck(req, res, next) : next(),
+    csrf.doubleCsrfProtection,
+  );
+  router.get("/providers", (_req, res) =>
+    res.json({ google: service.googleAvailable() }),
+  );
+  router.get(
+    "/google",
+    limiter.middleware("google-start", 20, 60),
+    async (_req, res) => {
+      const flow = await service.beginGoogle("login");
+      res.cookie(names.oauth, flow.browser, oauthOptions).redirect(flow.url);
+    },
+  );
+  router.get(
+    "/google/callback",
+    limiter.middleware("google-callback", 60, 60),
+    async (req, res) => {
+      const state = typeof req.query.state === "string" ? req.query.state : "";
+      const browser = req.cookies[names.oauth];
+      res.clearCookie(names.oauth, oauthOptions);
+      if (req.query.error) {
+        if (state && browser) await service.cancelGoogle(state, browser);
+        return res.redirect(
+          `${config.APP_ORIGIN}/auth/google/result?status=cancelled`,
+        );
+      }
+      try {
+        const result = await service.completeGoogle(
+          new URL(req.originalUrl, config.APP_ORIGIN),
+          state,
+          browser ?? "",
+        );
+        if (result.type === "authenticated") {
+          res.cookie(names.refresh, result.refreshToken, {
+            ...options,
+            expires: result.cookieExpires,
+          });
+          res.clearCookie(names.csrf, options);
+          return res.redirect(
+            `${config.APP_ORIGIN}/auth/google/result?status=success`,
+          );
+        }
+        const status = result.type === "linked" ? "linked" : "account_exists";
+        return res.redirect(
+          `${config.APP_ORIGIN}/auth/google/result?status=${status}`,
+        );
+      } catch (error) {
+        const status =
+          error instanceof HttpError && error.code === "GOOGLE_ACCOUNT_EXISTS"
+            ? "account_exists"
+            : "failed";
+        return res.redirect(
+          `${config.APP_ORIGIN}/auth/google/result?status=${status}`,
+        );
+      }
+    },
+  );
+  router.post(
+    "/register",
+    limiter.middleware("signup", 5, 3600),
+    async (req, res) => {
+      await service.register(registrationSchema.parse(req.body));
+      res.status(202).json({
+        message:
+          "Registration received. You can sign in now; if confirmation is available, an email will arrive shortly.",
+      });
+    },
+  );
+  router.post(
+    "/resend-verification",
+    limiter.middleware("resend-verification", 10, 3600),
+    async (req, res) => {
+      const { email } = resendVerificationSchema.parse(req.body);
+      await service.resendVerification(email);
+      res.status(202).json({
+        message:
+          "If the account can be verified, a new email will be sent shortly.",
+      });
+    },
+  );
+  router.post(
+    "/verify-email",
+    limiter.middleware("verify-email", 30, 900),
+    async (req, res) => {
+      const { token } = verifyEmailSchema.parse(req.body);
+      await service.verifyEmail(token);
+      res.json({ message: "Your email is verified. You can sign in." });
+    },
+  );
+  router.post(
+    "/complete-profile",
+    authenticate(service),
+    requireRole("CUSTOMER"),
+    async (req, res) => {
+      const input = completeProfileSchema.parse(req.body);
+      const user = await service.completeProfile(res.locals.user.id, input);
+      res.json(publicUser(user));
+    },
+  );
+  router.post(
+    "/google/link",
+    limiter.middleware("google-link", 10, 900),
+    authenticate(service),
+    requireRole("CUSTOMER"),
+    async (req, res) => {
+      const { password } = googleLinkSchema.parse(req.body);
+      const flow = await service.beginGoogleLink(
+        res.locals.user.id,
+        res.locals.authFamilyId,
+        password,
+      );
+      res.cookie(names.oauth, flow.browser, oauthOptions);
+      res.json({ authorizationUrl: flow.url });
+    },
+  );
+  router.post(
+    "/login",
+    limiter.middleware("login", 30, 900),
+    async (req, res) => {
+      const input = loginSchema.parse(req.body);
+      if ((await limiter.failures(input.email)) >= 5) {
+        res.setHeader("Retry-After", "900");
+        throw new HttpError(
+          429,
+          "RATE_LIMITED",
+          "Too many sign-in attempts. Please try again in 15 minutes.",
+        );
+      }
+      let result;
+      try {
+        result = await service.login(input.email, input.password);
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 401) {
+          await limiter.failed(input.email);
+          throw new HttpError(
+            401,
+            "INVALID_CREDENTIALS",
+            "Email or password is incorrect.",
+          );
+        }
+        throw error;
+      }
+      await limiter.succeeded(input.email);
+      res.cookie(names.refresh, result.refreshToken, {
+        ...options,
+        expires: result.cookieExpires,
+      });
+      res.clearCookie(names.csrf, options);
+      res.json(result.response);
+    },
+  );
+  router.post(
+    "/refresh",
+    limiter.middleware("refresh", 120, 60),
+    async (req, res) => {
+      emptySchema.parse(req.body);
+      const raw: unknown = req.cookies[names.refresh];
+      const familyId = await service.refreshFamily(raw);
+      if (familyId) {
+        const result = await limiter.hit(`refresh-family:${familyId}`, 30, 60);
+        if (result.blocked) {
+          res.setHeader("Retry-After", result.retryAfter);
+          throw new HttpError(
+            429,
+            "RATE_LIMITED",
+            "Too many session requests. Please wait and retry.",
+          );
+        }
+      }
+      try {
+        const result = await service.refresh(raw);
+        res.cookie(names.refresh, result.refreshToken, {
+          ...options,
+          expires: result.cookieExpires,
+        });
+        res.clearCookie(names.csrf, options);
+        res.json(result.response);
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 401)
+          res.clearCookie(names.refresh, options);
+        throw error;
+      }
+    },
+  );
+  router.post(
+    "/logout",
+    limiter.middleware("logout", 60, 60),
+    async (req, res) => {
+      emptySchema.parse(req.body);
+      await service.logout(req.cookies[names.refresh]);
+      res
+        .clearCookie(names.refresh, options)
+        .clearCookie(names.csrf, options)
+        .clearCookie(names.context, options)
+        .status(204)
+        .end();
+    },
+  );
+  router.post(
+    "/logout-all",
+    limiter.middleware("logout-all", 20, 60),
+    authenticate(service),
+    async (req, res) => {
+      emptySchema.parse(req.body);
+      await service.revokeAll(res.locals.user.id);
+      res
+        .clearCookie(names.refresh, options)
+        .clearCookie(names.csrf, options)
+        .clearCookie(names.context, options)
+        .status(204)
+        .end();
+    },
+  );
+  return router;
+}

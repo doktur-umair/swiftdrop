@@ -1,0 +1,246 @@
+SWIFTDROP - 10-MEMBER WORK DISTRIBUTION BY VERTICAL DELIVERABLE
+==================================================================
+Source reference: plan.md §4 & AGENTS.md
+Division Principle: Vertical delivery slices (Database + Contracts + Backend + Frontend + Tests).
+Silent Work (CI/CD, Docker/Compose, Helm, Repo configs) is excluded from task complexity balance.
+Target Complexity: ~20 relative units per member across DB, Backend, Frontend, and Quality/Security.
+
+------------------------------------------------------------------
+MEMBER 01 (M01)
+Name: doktur-umair (Branch: umair-dev)
+Role / Slice: Identity, Access, and User Administration
+Silent Work Role: Silent-work Steward (DevOps / Repo / CI / Compose hygiene)
+
+1. Requirements Owned:
+   - FR-A1: Customer registration & login (bcrypt-12, Unicode rules, blocklist)
+   - FR-A2: RS256 access JWT (15 min) + rotating refresh token (family revocation)
+   - FR-A3: Google sign-in with PKCE & account linking
+   - FR-A4: RBAC (5 human roles) & ownership guards
+   - FR-A5: Staff provisioning (Admin creates Courier/Dispatcher) & account suspension
+   - FR-A6: Per-IP and per-account rate limiting on auth endpoints
+   - FR-F2: Auth pages (Login, Register, Complete Profile, Security/Linking)
+   - FR-F5 (part): Admin Users Management UI
+   - Shared contracts: authenticate, requireRole, service-JWT verifier for workers
+2. Owned Data / Tables:
+   - File: packages/db/prisma/identity.prisma
+   - Tables: users, roles, session_families, refresh_tokens, access_grants, verification_tokens, oauth_transactions
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/auth, apps/core-api/src/modules/users
+   - Frontend: apps/web/src/features/auth, apps/web/src/features/users
+   - Contracts: packages/contracts/src/identity*
+4. Review Pair: M02 (Human Auth vs Machine Identity)
+5. How to Start Independently:
+   - Staff provisioning and suspension APIs + Admin users screen against current identity foundation.
+
+------------------------------------------------------------------
+MEMBER 02 (M02)
+Name: TBD (Branch: TBD)
+Role / Slice: Merchant Platform
+
+1. Requirements Owned:
+   - FR-M1: Merchant self-registration (atomic user + PENDING business creation)
+   - FR-M2: API Client management (generate, rotate, revoke, hashed secrets shown once)
+   - FR-M3: OAuth2 client-credentials grant (/oauth/token, 15-min tokens, scopes)
+   - FR-M4: Merchant order injection (POST /merchant/orders with Idempotency-Key)
+   - FR-M5: Webhook configuration (HTTPS-only, SSRF loopback protection, secret rotation)
+   - FR-M6: Orders dashboard (status filter) + delivery log & failure details
+   - FR-F7: Merchant Dashboard UI (API keys, webhook settings, orders, logs)
+   - FR-F5 (part): Admin Merchant Approvals UI (approve/reject pending merchants)
+2. Owned Data / Tables:
+   - File: packages/db/prisma/merchant.prisma
+   - Tables: merchants, api_clients, merchant_webhooks
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/merchants
+   - Frontend: apps/web/src/features/merchant
+   - Contracts: packages/contracts/src/merchant*
+4. Review Pair: M01
+5. How to Start Independently:
+   - Merchant tables, registration/approval endpoints, and API client CRUD using an in-memory fake ParcelsService and MSW handlers.
+
+------------------------------------------------------------------
+MEMBER 03 (M03)
+Name: TBD (Branch: TBD)
+Role / Slice: Pricing, Zones, and Reports
+
+1. Requirements Owned:
+   - FR-P1: Zones CRUD (district groupings) & versioned pricing rules (effective_from)
+   - FR-P2: Delivery quotes engine (POST /quotes, PricingStrategy, quoteId, 15-min expiry)
+   - FR-I7: Daily operations reports (deliveries/day, success rate) + CSV export
+   - FR-F5 (part): Admin Zones Management, Pricing Rules, & Reports UI
+   - NFR-8: Performance benchmark script (p95 < 300 ms targets for quotes/tracking)
+   - FR-B2 / FR-F9 (Stretch): AI Assistant service & UI chat widget
+2. Owned Data / Tables:
+   - File: packages/db/prisma/pricing.prisma
+   - Tables: zones, zone_districts, pricing_rules, quotes
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/pricing, apps/core-api/src/modules/reports
+   - Frontend: apps/web/src/features/pricing, apps/web/src/features/reports
+   - Contracts: packages/contracts/src/pricing*
+   - Stretch: apps/ai-assistant
+4. Review Pair: M04 (Quote generation -> Parcel consumption)
+5. How to Start Independently:
+   - Pure quote pricing calculation engine with unit tests, zone/pricing tables, and Admin pricing screen with MSW.
+
+------------------------------------------------------------------
+MEMBER 04 (M04)
+Name: TBD (Branch: TBD)
+Role / Slice: Customer Booking and Parcel Records
+
+1. Requirements Owned:
+   - FR-P3: Parcel creation from owner-bound quoteId; Idempotency-Key handler (saving request hash & response atomically)
+   - FR-P6: Customer parcel list, detail, and timeline history (ownership-scoped, 404 on foreign IDs)
+   - FR-P8: PDF delivery receipt generation & private MinIO signed URL retrieval
+   - FR-F3: Customer Booking Wizard, Parcel History, Detail View, and Receipt Download UI
+   - Shared service: ParcelsService.createFromQuote() and merchant/staff creation variants
+2. Owned Data / Tables:
+   - File: packages/db/prisma/parcel.prisma
+   - Tables: parcels, idempotency_keys, receipts
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/parcels
+   - Frontend: apps/web/src/features/customer
+   - Contracts: packages/contracts/src/parcel*
+4. Review Pair: M03
+5. How to Start Independently:
+   - Parcel schema, idempotency helper, and booking wizard using a stubbed quote provider and mock outbox.
+
+------------------------------------------------------------------
+MEMBER 05 (M05)
+Name: TBD (Branch: TBD)
+Role / Slice: Parcel Lifecycle, Cancellation, and Public Tracking
+
+1. Requirements Owned:
+   - FR-P4: Parcel state machine & single transition table (Created -> PickedUp -> InTransit -> OutForDelivery -> Delivered / Failed)
+   - FR-P5: Append-only parcel_status_history, optimistic locking (version), attempt counter management
+   - FR-P7: Public tracking endpoint (GET /track/{trackingNo}) - status, timestamp, town only (no PII)
+   - FR-P9: Pre-pickup cancellation protocol with expectedVersion & shared capacity lock
+   - FR-F4: Mobile-first Public Tracking UI
+   - FR-F8 (part): Staff operational parcel create, status change, and cancel screens
+   - Re-attempt scheduling: Dispatcher/Admin scheduling of up to 2 re-attempts (3 attempts total) on failure
+2. Owned Data / Tables:
+   - File: packages/db/prisma/lifecycle.prisma
+   - Tables: parcel_status_history, delivery_attempts, transition_rules (authoritative writer of parcels.current_status, version, and attempt_count)
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/lifecycle, apps/core-api/src/modules/tracking
+   - Frontend: apps/web/src/features/tracking, apps/web/src/features/staff-ops
+   - Contracts: packages/contracts/src/lifecycle* (pure transition table function)
+4. Review Pair: M06 (Lifecycle transitions vs Assignment locks)
+5. How to Start Independently:
+   - Pure transition table contract + unit tests, LifecycleService on in-memory repositories, and public tracking UI.
+
+------------------------------------------------------------------
+MEMBER 06 (M06)
+Name: TBD (Branch: TBD)
+Role / Slice: Dispatch and Courier Capacity
+
+1. Requirements Owned:
+   - FR-D1: Dispatcher unassigned parcel queue (FIFO, filtered by pickup zone)
+   - FR-D2: Safe assign / reassign transaction (sorted courier row locks, version recheck, on-duty & reserved capacity validation)
+   - FR-D3: Courier workload and active capacity utilization views
+   - FR-F8 (part): Dispatcher Console UI (unassigned queue, assign/reassign modal, courier workload dashboard)
+   - Concurrency tests for courier slot contention and race condition prevention
+2. Owned Data / Tables:
+   - File: packages/db/prisma/dispatch.prisma
+   - Tables: courier_profiles (on_duty, max_capacity, current_workload), courier_assignments
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/dispatch
+   - Frontend: apps/web/src/features/dispatcher
+   - Contracts: packages/contracts/src/dispatch*
+4. Review Pair: M05
+5. How to Start Independently:
+   - Courier capacity and assignment database models, assignment locking protocol against seeded database, and Dispatcher UI shell with MSW.
+
+------------------------------------------------------------------
+MEMBER 07 (M07)
+Name: TBD (Branch: TBD)
+Role / Slice: Courier Delivery and Offline PWA
+
+1. Requirements Owned:
+   - FR-K1: Courier "today's jobs" list (strictly assigned parcels only)
+   - FR-K2: Status update endpoints: Delivered (requires recipient name, optional private photo upload to MinIO) and Failed (reason from fixed list)
+   - FR-K3: Offline operation queue in PWA (stable operation keys, expectedVersion, per-parcel ordering, replay after re-auth, conflict pause)
+   - FR-F6: Mobile-first installable Courier PWA (manifest, service worker, touch targets >= 44px, budget < 250 KB gzip)
+2. Owned Data / Tables:
+   - File: packages/db/prisma/courier.prisma
+   - Tables: courier_operation_ledger, delivery_proof_metadata
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/modules/courier
+   - Frontend: apps/web/src/features/courier
+   - Contracts: packages/contracts/src/courier*
+4. Review Pair: M10 (PWA & Client Foundation)
+5. How to Start Independently:
+   - PWA manifest, service worker caching, IndexedDB offline operation queue, and courier job list screens against MSW.
+
+------------------------------------------------------------------
+MEMBER 08 (M08)
+Name: TBD (Branch: TBD)
+Role / Slice: Eventing and Webhook Delivery
+
+1. Requirements Owned:
+   - FR-I1: Outbox publisher/relay worker (1s polling, confirms to topic exchange 'swiftdrop.events', atomic published_at mark)
+   - FR-I2: RabbitMQ topology declarations, exchange bindings, quorum queues, dead-letter queues (DLQ)
+   - FR-I4: Webhook dispatcher service (HMAC-SHA256 signature, 5s timeout, 6 retries with 30s-960s backoff, durable attempt log)
+   - FR-I5: Admin-only audited webhook replay endpoint and UI (retains original eventId, new replay run)
+   - FR-F5 (part): Admin Webhook Delivery Logs & Replay UI
+   - Shared platform helper: outbox.add(tx, event) transactional writer
+2. Owned Data / Tables:
+   - File: packages/db/prisma/messaging.prisma
+   - Tables: outbox_events, webhook_deliveries, webhook_attempts, webhook_replays
+3. Primary Code Locations:
+   - Backend: apps/outbox-relay, apps/webhook-svc, packages/messaging, apps/core-api/src/shared/outbox
+   - Frontend: apps/web/src/features/webhook-admin
+   - Contracts: packages/contracts/src/messaging*
+4. Review Pair: M09 (Event Publishers vs Event Consumers)
+5. How to Start Independently:
+   - RabbitMQ topology definitions in packages/messaging, outbox relay consumer harness, and standalone webhook delivery runner.
+
+------------------------------------------------------------------
+MEMBER 09 (M09)
+Name: TBD (Branch: TBD)
+Role / Slice: Notifications and Realtime
+
+1. Requirements Owned:
+   - FR-I3: Notification worker (Mailpit SMTP, mock SMS adapter, booking/status templates, eventId deduplication, recipient masking)
+   - FR-I6: Realtime Socket.IO gateway (Redis adapter, sticky sessions, public room 'public:<trackingNo>', authorized private room 'private:<parcelId>')
+   - Realtime Client Integration: Socket.IO client hooks for live parcel tracking and timeline status changes (FR-F3/FR-F4 live updates)
+   - Token expiry / reassignment real-time room eviction
+2. Owned Data / Tables:
+   - File: packages/db/prisma/notification.prisma
+   - Tables: processed_events, notification_logs
+   - In-memory / State: Redis socket adapter rooms & sessions
+3. Primary Code Locations:
+   - Backend: apps/notification-svc, apps/core-api/src/modules/realtime
+   - Frontend: apps/web/src/shared/realtime
+   - Contracts: packages/contracts/src/events*
+4. Review Pair: M08
+5. How to Start Independently:
+   - Email templates with Mailpit, Socket.IO gateway testbed with Redis adapter, and mock client event emitter.
+
+------------------------------------------------------------------
+MEMBER 10 (M10)
+Name: TBD (Branch: TBD)
+Role / Slice: Platform Kernel and Web Foundation
+
+1. Requirements Owned:
+   - FR-F1: Web App Shell, Design System tokens, layout, central role guards, navigation router
+   - Shared Kernel: RFC 7807 problem details, redacted Pino logger, correlation-id middleware, cursor pagination utilities
+   - Client Pipeline: OpenAPI generation pipeline from Zod contracts & strongly-typed fetch client
+   - Frontend Mocking: Mock Service Worker (MSW) foundation and dev:mock harness
+   - Cross-cutting Quality: Web bundle budgets (< 250 KB gzip), accessibility (axe/keyboard/reduced-motion), and seed composition
+2. Owned Data / Tables:
+   - Seed scripts: packages/db/seed
+   - Shared DB conventions (cursor pagination, index naming rules)
+3. Primary Code Locations:
+   - Backend: apps/core-api/src/shared (kernel, errors, logger, config), apps/core-api/src/app.ts
+   - Frontend: apps/web/src/shared, apps/web/src/mocks, apps/web/src/App.tsx, apps/web/src/routes.tsx
+   - Contracts: packages/contracts/src/common*, packages/contracts/src/openapi*
+4. Review Pair: M07
+5. How to Start Independently:
+   - Shared kernel modules, typed OpenAPI client generator, central web layout shell, and MSW mock provider.
+
+==================================================================
+REVIEW PAIRS & INTEGRATION SEAMS:
+- M01 <-> M02: Human authentication vs Machine OAuth & credentials
+- M03 <-> M04: Pricing quotes generation -> Parcel booking quote consumption
+- M05 <-> M06: Parcel lifecycle state machine -> Dispatch capacity & row locks
+- M07 <-> M10: Courier offline PWA -> Web foundation, typed client, and budgets
+- M08 <-> M09: Outbox & RabbitMQ event producers -> Consumer workers (Webhooks/Notifications/Sockets)

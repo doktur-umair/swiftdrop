@@ -1,0 +1,36 @@
+{
+  "name": "swiftdrop",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.11 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter core-api --filter web dev",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter core-api test && pnpm --filter web test",
+    "test:integration": "pnpm --filter core-api test:integration",
+    "build": "pnpm --filter web build && pnpm --filter core-api build",
+    "auth:keys:generate": "node scripts/auth-keys.mjs",
+    "db:generate": "pnpm --filter @swiftdrop/db generate",
+    "db:migrate": "pnpm --filter @swiftdrop/db migrate",
+    "db:reset": "pnpm --filter @swiftdrop/db reset",
+    "db:seed": "pnpm --filter @swiftdrop/db seed",
+    "auth:cleanup": "pnpm --filter core-api cleanup",
+    "contracts:generate": "pnpm --filter @swiftdrop/contracts generate",
+    "contracts:check": "pnpm --filter @swiftdrop/contracts check",
+    "format:check": "prettier --check apps packages/config packages/contracts/src/index.ts packages/contracts/src/generate.ts packages/db/src packages/db/prisma packages/db/prisma.config.ts scripts eslint.config.mjs",
+    "test:built": "node scripts/check-built.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "eslint": "^10.13.0",
+    "@eslint/js": "^10.0.1",
+    "globals": "^16.5.0",
+    "tsx": "^4.20.6",
+    "@types/node": "^24.10.0",
+    "prettier": "^3.6.2"
+  }
+}
