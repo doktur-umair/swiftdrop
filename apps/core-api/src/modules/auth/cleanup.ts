@@ -1,0 +1,45 @@
+import type { Database } from "@swiftdrop/db";
+export async function cleanupAuth(db: Database, now = new Date()) {
+  const grants = await db.accessGrant.findMany({
+    where: { expiresAt: { lte: now } },
+    select: { jti: true },
+    take: 500,
+  });
+  const families = await db.authSession.findMany({
+    where: { absoluteExpiresAt: { lte: now } },
+    select: { id: true },
+    take: 100,
+  });
+  const verificationTokens = await db.verificationToken.findMany({
+    where: { expiresAt: { lte: now } },
+    select: { id: true },
+    take: 500,
+  });
+  const oauthTransactions = await db.oAuthTransaction.findMany({
+    where: { expiresAt: { lte: now } },
+    select: { id: true },
+    take: 500,
+  });
+  await db.$transaction(async (tx) => {
+    await tx.accessGrant.deleteMany({
+      where: { jti: { in: grants.map((grant) => grant.jti) } },
+    });
+    const familyIds = families.map((family) => family.id);
+    await tx.refreshToken.deleteMany({
+      where: { familyId: { in: familyIds } },
+    });
+    await tx.authSession.deleteMany({ where: { id: { in: familyIds } } });
+    await tx.verificationToken.deleteMany({
+      where: { id: { in: verificationTokens.map(({ id }) => id) } },
+    });
+    await tx.oAuthTransaction.deleteMany({
+      where: { id: { in: oauthTransactions.map(({ id }) => id) } },
+    });
+  });
+  return {
+    grants: grants.length,
+    families: families.length,
+    verificationTokens: verificationTokens.length,
+    oauthTransactions: oauthTransactions.length,
+  };
+}

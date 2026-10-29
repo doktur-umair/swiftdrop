@@ -9,3 +9,8 @@ build/
 *.log
 .vscode/
 .idea/
+
+.local/
+coverage/
+packages/db/src/generated/
+*.tsbuildinfo
